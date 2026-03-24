@@ -22,7 +22,3 @@ npx skills add silverbucket/unhosted-web-skills --skill sockethub
 /plugin marketplace add silverbucket/unhosted-web-skills
 /plugin install sockethub@unhosted-web-skills
 ```
-
-## License
-
-LGPL-3.0

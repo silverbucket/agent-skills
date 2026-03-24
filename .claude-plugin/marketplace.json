@@ -1,0 +1,22 @@
+{
+  "name": "unhosted-web-skills",
+  "owner": {
+    "name": "Nick Jennings",
+    "email": "nick@silverbucket.net"
+  },
+  "metadata": {
+    "description": "Agent skills for building unhosted web applications",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "sockethub",
+      "description": "Multi-protocol messaging gateway bridging web apps to IRC, XMPP, and RSS/Atom via ActivityStreams",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/sockethub"
+      ]
+    }
+  ]
+}

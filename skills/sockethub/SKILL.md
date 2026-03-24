@@ -36,8 +36,11 @@ bun add -g sockethub@alpha
 
 # Start server (requires Redis)
 sockethub --port 10550
+```
 
-# Or run with Docker
+Or start Redis via Docker, then run sockethub:
+
+```bash
 docker run -d --name redis redis
 sockethub
 ```
@@ -185,11 +188,11 @@ All messages follow ActivityStreams 2.0 structure:
 
 ```javascript
 {
-  context: 'irc' | 'xmpp' | 'feeds', // Platform identifier
-  type: 'send' | 'join' | 'connect', // Action type
+  context: 'irc',                              // 'irc' | 'xmpp' | 'feeds'
+  type: 'send',                                // 'send' | 'join' | 'connect'
   actor: { id: 'user@server', type: 'person' }, // Who is acting
   target: { id: 'room@server', type: 'room' }, // Target of action
-  object: { type: 'Note', content: '...' } // Payload
+  object: { type: 'Note', content: '...' }     // Payload
 }
 ```
 

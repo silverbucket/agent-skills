@@ -27,7 +27,9 @@ The client's `contextFor(platform)` method builds this array automatically.
 
 ## Valid Object Types
 
-Messages sent through Sockethub must use one of these object types:
+Outbound messages (client to platform) must use one of these object types.
+Server responses may also include AS2 core types like `collection` and `create`
+(e.g., feed fetch results).
 
 | Type | Description | Usage |
 |------|-------------|-------|
@@ -39,8 +41,9 @@ Messages sent through Sockethub must use one of these object types:
 | `topic` | Room topic/subject | Channel topic changes |
 | `address` | Identity/nick change | Nick changes, identity updates |
 
-Using an invalid type (e.g., `'Note'`) causes silent validation failure -- the
-message is dropped without a clear error.
+Using an invalid type (e.g., `'Note'`) causes validation failure -- the server
+emits a `failed` event back to the client, but the error message may not clearly
+indicate that the object type was the problem.
 
 ## Exported Schemas
 
@@ -90,7 +93,7 @@ Credentials follow a platform-specific schema but share common structure:
   actor: { id: 'user@host' }, // Required: who the credentials belong to
   object: {
     type: 'credentials',      // Required: must be 'credentials'
-    // ... platform-specific fields (see references/platforms.md)
+    // ... platform-specific fields (see platforms.md)
   }
 }
 ```

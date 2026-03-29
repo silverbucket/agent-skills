@@ -323,8 +323,8 @@ const sc = new SockethubClient(socket, {
   maxQueuedAgeMs: 30000     // Max age for queued messages
 });
 
-// Initialize -- must await before sending messages
-// Messages sent before ready() are auto-queued and flushed after
+// Initialize -- recommended to await before sending messages
+// Messages sent before ready() are queued (up to the above limits) and flushed afterward
 await sc.ready();
 
 // Properties

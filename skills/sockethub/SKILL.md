@@ -12,7 +12,7 @@ metadata:
 
 A polyglot messaging gateway that translates ActivityStreams messages to
 protocol-specific formats, enabling browser JavaScript to communicate with IRC,
-XMPP, and feed services.
+XMPP, and feed services through a unified API.
 
 ## When to Use
 
@@ -26,6 +26,27 @@ Invoke when you need to:
 - Handle real-time bidirectional communication with legacy protocols
 - Generate metadata previews for shared URLs
 
+## Architecture
+
+Sockethub runs as a multi-process system:
+
+- **Server process**: Express + Socket.IO hub handling validation, encryption, and routing
+- **Platform workers**: Isolated processes per protocol (IRC, XMPP, Feeds, Metadata)
+- **Redis/BullMQ**: Job queue for encrypted message routing between server and workers
+- **IPC**: Platform-to-client messages bypass Redis for low latency
+
+Each client Socket.IO connection gets a unique session with its own encryption key.
+Credentials are encrypted at rest in Redis via `@sockethub/crypto`. Platform crashes
+are isolated -- one worker failing does not affect others.
+
+**Platform types:**
+- **Persistent** (IRC, XMPP): Maintain long-lived connections, require authentication,
+  auto-reconnect on failure
+- **Stateless** (Feeds, Metadata): No persistent connections, always ready, ideal for
+  HTTP-based operations
+
+See `references/architecture.md` for detailed internals.
+
 ## Quick Start
 
 ### Server Setup
@@ -38,11 +59,24 @@ bun add -g sockethub@alpha
 sockethub --port 10550
 ```
 
-Or start Redis via Docker, then run sockethub:
+Or use Docker Compose:
+
+```yaml
+# docker-compose.yml
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  sockethub:
+    image: sockethub/sockethub:alpha
+    ports: ["10550:10550"]
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on: [redis]
+```
 
 ```bash
-docker run -d --name redis redis
-sockethub
+docker compose up -d
 ```
 
 ### Client Connection
@@ -52,18 +86,23 @@ import SockethubClient from '@sockethub/client';
 import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:10550', { path: '/sockethub' });
-const sc = new SockethubClient(socket);
+const sc = new SockethubClient(socket, { initTimeoutMs: 5000 });
+await sc.ready(); // loads schema registry -- must await before sending
 
 // Listen for messages
 sc.socket.on('message', (msg) => console.log(msg));
 
 // Send ActivityStreams message
 sc.socket.emit('message', {
-  context: 'irc',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
+  ],
   type: 'send',
-  actor: 'myuser@irc.libera.chat',
+  actor: { id: 'myuser@irc.libera.chat', type: 'person' },
   target: { id: '#channel@irc.libera.chat', type: 'room' },
-  object: { type: 'Note', content: 'Hello!' }
+  object: { type: 'message', content: 'Hello!' }
 });
 ```
 
@@ -74,7 +113,11 @@ sc.socket.emit('message', {
 ```javascript
 // Set credentials
 sc.socket.emit('credentials', {
-  context: 'irc',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
+  ],
   type: 'credentials',
   actor: { id: 'mynick@irc.libera.chat' },
   object: {
@@ -88,16 +131,24 @@ sc.socket.emit('credentials', {
 
 // Connect
 sc.socket.emit('message', {
-  context: 'irc',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
+  ],
   type: 'connect',
-  actor: 'mynick@irc.libera.chat'
+  actor: { id: 'mynick@irc.libera.chat', type: 'person' }
 });
 
 // Join channel
 sc.socket.emit('message', {
-  context: 'irc',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
+  ],
   type: 'join',
-  actor: 'mynick@irc.libera.chat',
+  actor: { id: 'mynick@irc.libera.chat', type: 'person' },
   target: { id: '#sockethub@irc.libera.chat', type: 'room' }
 });
 ```
@@ -107,7 +158,11 @@ sc.socket.emit('message', {
 ```javascript
 // Set XMPP credentials
 sc.socket.emit('credentials', {
-  context: 'xmpp',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
+  ],
   type: 'credentials',
   actor: { id: 'user@jabber.org' },
   object: {
@@ -120,17 +175,25 @@ sc.socket.emit('credentials', {
 
 // Connect and send
 sc.socket.emit('message', {
-  context: 'xmpp',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
+  ],
   type: 'connect',
-  actor: 'user@jabber.org'
+  actor: { id: 'user@jabber.org', type: 'person' }
 });
 
 sc.socket.emit('message', {
-  context: 'xmpp',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
+  ],
   type: 'send',
-  actor: 'user@jabber.org',
+  actor: { id: 'user@jabber.org', type: 'person' },
   target: { id: 'friend@jabber.org', type: 'person' },
-  object: { type: 'Note', content: 'Hello from Sockethub!' }
+  object: { type: 'message', content: 'Hello from Sockethub!' }
 });
 ```
 
@@ -138,17 +201,42 @@ sc.socket.emit('message', {
 
 ```javascript
 sc.socket.emit('message', {
-  context: 'feeds',
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/feeds/v1.jsonld'
+  ],
   type: 'fetch',
   actor: { id: 'https://example.com/feed.rss' }
 });
 
 // Response is a Collection of Create activities with feed entries
 sc.socket.on('message', (msg) => {
-  if (msg.context === 'feeds') {
+  if (msg['@context']?.some(c => c.includes('/feeds/'))) {
     msg.object.items.forEach(entry => {
       console.log(entry.object.title, entry.object.url);
     });
+  }
+});
+```
+
+### Example 4: Fetch URL metadata
+
+```javascript
+sc.socket.emit('message', {
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',
+    'https://sockethub.org/ns/context/v1.jsonld',
+    'https://sockethub.org/ns/context/platform/metadata/v1.jsonld'
+  ],
+  type: 'fetch',
+  actor: { id: 'https://example.com/article' }
+});
+
+// Response contains Open Graph data
+sc.socket.on('message', (msg) => {
+  if (msg['@context']?.some(c => c.includes('/metadata/'))) {
+    console.log(msg.object.title, msg.object.description, msg.object.image);
   }
 });
 ```
@@ -159,46 +247,67 @@ sc.socket.on('message', (msg) => {
 sockethub [options]
 
 Options:
-  --port <number>      Server port (default: 10550, env: PORT)
-  --host <string>      Server host (default: localhost, env: HOST)
-  --config, -c <path>  Path to sockethub.config.json
-  --examples           Enable example pages at /examples
-  --info               Display runtime information
-  --redis.url <url>    Redis connection URL (env: REDIS_URL)
-  --sentry.dsn <dsn>   Sentry DSN for error reporting
+  --port <number>        Server port (default: 10550, env: PORT)
+  --host <string>        Server host (default: localhost, env: HOST)
+  --config, -c <path>    Path to sockethub.config.json
+  --examples             Enable example pages at /examples
+  --info                 Display runtime information
+  --redis.url <url>      Redis connection URL (env: REDIS_URL)
+  --platforms <list>     Comma-separated enabled platforms
+  --public.host <host>   Public-facing hostname (reverse proxy)
+  --public.port <port>   Public-facing port
+  --public.path <path>   Public-facing base path
+  --rateLimit <number>   Max events per second per client (default: 100)
+  --sentry.dsn <dsn>     Sentry DSN for error reporting
 
 Environment Variables:
-  PORT        Server port
-  HOST        Server hostname
-  REDIS_URL   Redis connection string
-  DEBUG       Debug namespaces (e.g., sockethub*)
+  PORT                                      Server port
+  HOST                                      Server hostname
+  REDIS_URL                                 Redis connection string
+  LOG_LEVEL                                 Logging verbosity (debug, info, warn, error)
+  SOCKETHUB_PLATFORM_HEARTBEAT_INTERVAL_MS  Worker heartbeat interval
+  SOCKETHUB_PLATFORM_TIMEOUT_MS             Worker timeout threshold
 ```
 
 ## Supported Platforms
 
-- IRC (`irc`): connect, join, leave, send, update, query, disconnect
-- XMPP (`xmpp`): connect, join, leave, send, update, request-friend, make-friend,
-  remove-friend, query, disconnect
-- Feeds (`feeds`): fetch (RSS 2.0, Atom 1.0, RSS 1.0/RDF)
-- Metadata (`metadata`): fetch (Open Graph and page metadata)
+| Platform | Type | Actions | Description |
+|----------|------|---------|-------------|
+| IRC (`irc`) | Persistent | connect, join, leave, send, update, query, disconnect | Internet Relay Chat |
+| XMPP (`xmpp`) | Persistent | connect, join, leave, send, update, request-friend, make-friend, remove-friend, query, disconnect | Extensible Messaging and Presence |
+| Feeds (`feeds`) | Stateless | fetch | RSS 2.0, Atom 1.0, RSS 1.0/RDF |
+| Metadata (`metadata`) | Stateless | fetch | Open Graph and page metadata extraction |
+
+See `references/platforms.md` for per-platform details and credential schemas.
 
 ## ActivityStreams Message Format
 
-All messages follow ActivityStreams 2.0 structure:
+All messages follow ActivityStreams 2.0 structure with Sockethub context:
 
 ```javascript
 {
-  context: 'irc',                              // 'irc' | 'xmpp' | 'feeds'
-  type: 'send',                                // 'send' | 'join' | 'connect'
+  '@context': [
+    'https://www.w3.org/ns/activitystreams',         // AS2 base
+    'https://sockethub.org/ns/context/v1.jsonld',    // Sockethub base
+    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'  // Platform
+  ],
+  type: 'send',                                // Action type
   actor: { id: 'user@server', type: 'person' }, // Who is acting
   target: { id: 'room@server', type: 'room' }, // Target of action
-  object: { type: 'Note', content: '...' }     // Payload
+  object: { type: 'message', content: '...' }  // Payload
 }
 ```
 
+**Valid object types:** `message`, `me`, `credentials`, `attendance`, `presence`,
+`topic`, `address`
+
 If `actor` is provided as a string, Sockethub expands it using any previously
-saved ActivityObject with the same id (including `type` and any other stored
-properties). If none exists, it expands to `{ id }`.
+saved ActivityObject with the same id. If none exists, it expands to `{ id }`.
+
+The client automatically injects `@context` if missing (via `contextFor(platform)`),
+but explicitly providing it is recommended.
+
+See `references/schema-validation.md` for full schema details.
 
 ## API Reference
 
@@ -207,21 +316,32 @@ properties). If none exists, it expands to `{ id }`.
 ```javascript
 import SockethubClient from '@sockethub/client';
 
-const sc = new SockethubClient(socket);
+// Constructor options
+const sc = new SockethubClient(socket, {
+  initTimeoutMs: 5000,      // Schema registry load timeout
+  maxQueuedOutbound: 100,   // Max queued messages before ready()
+  maxQueuedAgeMs: 30000     // Max age for queued messages
+});
+
+// Initialize -- must await before sending messages
+// Messages sent before ready() are auto-queued and flushed after
+await sc.ready();
 
 // Properties
 sc.socket           // Underlying Socket.IO instance
-sc.ActivityStreams  // ActivityStreams helper library
+sc.ActivityStreams   // ActivityStreams helper library
 
 // Methods
 sc.clearCredentials()  // Remove stored credentials
 
 // Events
-sc.socket.on('message', handler)      // Incoming messages
-sc.socket.on('completed', handler)    // Job completion
-sc.socket.on('failed', handler)       // Job failure
-sc.socket.emit('message', activity)   // Send message
-sc.socket.emit('credentials', creds)  // Set credentials
+sc.socket.on('message', handler)      // Incoming platform messages
+sc.socket.on('completed', handler)    // Job completion acknowledgement
+sc.socket.on('failed', handler)       // Job failure notification
+sc.socket.on('connect', handler)      // Socket.IO transport connected
+sc.socket.on('disconnect', handler)   // Socket.IO transport disconnected
+sc.socket.emit('message', activity)   // Send ActivityStreams message
+sc.socket.emit('credentials', creds)  // Set platform credentials
 ```
 
 ### IRC Credentials
@@ -252,13 +372,18 @@ sc.socket.emit('credentials', creds)  // Set credentials
 ## Requirements
 
 - Bun >= 1.2.4 (or Node.js 18+)
-- Redis server
+- Redis >= 6.0
 
 ## Related Packages
 
 - `@sockethub/client` - Browser/Node client library
 - `@sockethub/server` - Core server implementation
+- `@sockethub/schemas` - Schema registry and validation
 - `@sockethub/activity-streams` - ActivityStreams utilities
+- `@sockethub/crypto` - Session credential encryption
+- `@sockethub/data-layer` - Redis/BullMQ data abstraction
+- `@sockethub/logger` - Structured Winston logging
 - `@sockethub/platform-irc` - IRC platform
 - `@sockethub/platform-xmpp` - XMPP platform
 - `@sockethub/platform-feeds` - RSS/Atom platform
+- `@sockethub/irc2as` - IRC-to-ActivityStreams translator

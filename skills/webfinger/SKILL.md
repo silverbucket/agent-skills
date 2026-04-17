@@ -228,7 +228,7 @@ All four options are independent; pass any subset.
 
 | Option                     | Default | Purpose                                                                                                    |
 |----------------------------|---------|------------------------------------------------------------------------------------------------------------|
-| `tls_only`                 | `true`  | Require HTTPS for non-localhost hosts. **Localhost is always reached over HTTP**, regardless of this setting (webfinger.js@3.0.3 unconditionally selects `http://` for `localhost` / `localhost.localdomain`). When `false`, the library will also retry over HTTP for any host if the HTTPS request fails. |
+| `tls_only`                 | `true`  | Require HTTPS for non-localhost hosts. **Localhost is always reached over HTTP**, regardless of this setting (webfinger.js@3.0.4 unconditionally selects `http://` for `localhost` / `localhost.localdomain`). When `false`, the library will also retry over HTTP for any host if the HTTPS request fails. |
 | `uri_fallback`             | `false` | If `/.well-known/webfinger` fails, also try `/.well-known/host-meta` and `/.well-known/host-meta.json`.    |
 | `request_timeout`          | `10000` | Per-request timeout in milliseconds.                                                                       |
 | `allow_private_addresses`  | `false` | Disable the SSRF blocklist. **Development only** — never set `true` in production.                         |
@@ -257,7 +257,7 @@ Accepts a bare address (`user@domain`) or an `acct:` URI; bare addresses are
 treated as `acct:` automatically. Resolves to a `WebFingerResult`; rejects with
 `WebFingerError`.
 
-> **Caveat for non-`acct:` URIs**: webfinger.js@3.0.3 concatenates the address
+> **Caveat for non-`acct:` URIs**: webfinger.js@3.0.4 concatenates the address
 > into the query string verbatim (`'?resource=' + uri + address`) without
 > percent-encoding. Any `&`, `?`, `=`, or other reserved character in a passed
 > URI corrupts the request. For example, `lookup('https://example.com/p?x=1&y=2')`
@@ -296,7 +296,7 @@ the full URI form (e.g. `'http://webfinger.net/rel/avatar'`) does **not** work.
 >   `http://openid.net/specs/connect/1.0/issuer` for OIDC), call `lookup()` and
 >   read `result.object.links` directly.
 > - The `camlistore` rel is in the allowed list but a typo in webfinger.js
->   v3.0.3's internal mapping (`camilstore` vs `camlistore`) prevents links from
+>   v3.0.4's internal mapping (`camilstore` vs `camlistore`) prevents links from
 >   landing in the indexed view. Avoid relying on it.
 
 ### `WebFingerError`
@@ -365,8 +365,15 @@ defaults. Treat the defaults as the baseline; only relax them with intent.
   - Multicast: `224.0.0.0/4`, `ff00::/8`
   - Reserved: `240.0.0.0/4`
   - IPv6 ULA: `fc00::/7`
+- **Host canonicalization** (v3.0.4+): alternative loopback encodings such as
+  `2130706433`, `0x7f000001`, and `127.1` are canonicalized before the blocklist
+  check, so they cannot be used to bypass SSRF protection.
 - **Redirects are capped** at 3 hops. Each redirect target is re-validated
-  against the blocklist (mitigates DNS-rebinding).
+  against the blocklist using the same canonicalization pipeline as the initial
+  lookup (mitigates DNS-rebinding).
+- **Per-request timeouts** (v3.0.4+): `request_timeout` is enforced via
+  `AbortController` on each HTTP attempt, so stalled response bodies no longer
+  hang the promise past the configured bound.
 - **`allow_private_addresses: true` is for local development only.** Use it when
   testing against a local WebFinger server; never in production.
 - **Browser deployments** rely on the browser's own CORS and same-origin

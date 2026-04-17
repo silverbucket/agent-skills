@@ -126,7 +126,7 @@ A server MAY return a JRD with an empty `links` array or omit `links` entirely
 when there are no links to return. An empty `subject`-only JRD is a valid
 response to a successful lookup with no advertised services.
 
-> **webfinger.js@3.0.3 caveat**: The library requires the parsed JRD to have a
+> **webfinger.js@3.0.4 caveat**: The library requires the parsed JRD to have a
 > `links` property of type `object` and rejects with `WebFingerError: unknown
 > response from server` otherwise. An RFC-valid subject-only JRD (no `links`
 > field at all) will therefore fail. Servers targeted by webfinger.js clients

@@ -1,6 +1,7 @@
 ---
 name: webfinger
-description: Discover user services (remoteStorage endpoints, ActivityPub actors, profile pages, avatars,
+description: >-
+  Discover user services (remoteStorage endpoints, ActivityPub actors, profile pages, avatars,
   OpenID Connect issuers) from an email-like address using the WebFinger protocol (RFC 7033). Use when
   building apps that resolve acct: URIs, look up user metadata from `user@domain`, integrate with
   remoteStorage, Mastodon or other fediverse software, implement OpenID Connect issuer discovery, or

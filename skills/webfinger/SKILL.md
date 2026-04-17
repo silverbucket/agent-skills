@@ -192,11 +192,19 @@ const results = await lookupMany([
 
 ### Example 5: Error handling
 
-Errors from `lookup()` are always instances of `WebFingerError` (with an optional
-`status` for HTTP responses). Errors from `lookupLink()` come in two shapes: a
-`WebFingerError` from the underlying lookup, **or** a plain string (`'unsupported
-rel X'`, `'no links found with rel="X"'`) for rel-validation failures. Plain
-strings are not `Error` instances, so an `instanceof Error` check will miss them.
+Errors come in three shapes from webfinger.js@3.0.4:
+
+1. **`WebFingerError`** (with an optional `status` for HTTP responses) — the
+   library's own failures: bad address, HTTPS-only violation, SSRF block,
+   HTTP 4xx/5xx from the server, malformed JRD, request timeout.
+2. **Raw `TypeError`** — propagated verbatim from the runtime's `fetch()` for
+   transport failures (DNS failure, TLS handshake failure, network unreachable,
+   and — in browsers — CORS rejection). The library does not wrap these.
+3. **Plain string** (only from `lookupLink`) — `'unsupported rel <rel>'` or
+   `'no links found with rel="<rel>"'`. Not an `Error` instance, so
+   `instanceof Error` misses them.
+
+A robust handler covers all three:
 
 ```javascript
 import WebFinger, { WebFingerError } from 'webfinger.js';
@@ -213,6 +221,9 @@ try {
     } else {
       console.error(`WebFinger failed (${err.status ?? 'no status'}): ${err.message}`);
     }
+  } else if (err instanceof TypeError) {
+    // Transport-level failure from fetch: DNS, TLS, network, or CORS.
+    console.error('Network failure:', err.message);
   } else if (typeof err === 'string') {
     // 'unsupported rel <rel>' or 'no links found with rel="<rel>"'
     console.warn('lookupLink rejection:', err);
@@ -229,13 +240,17 @@ All four options are independent; pass any subset.
 | Option                     | Default | Purpose                                                                                                    |
 |----------------------------|---------|------------------------------------------------------------------------------------------------------------|
 | `tls_only`                 | `true`  | Require HTTPS for non-localhost hosts. **Localhost is always reached over HTTP**, regardless of this setting (webfinger.js@3.0.4 unconditionally selects `http://` for `localhost` / `localhost.localdomain`). When `false`, the library will also retry over HTTP for any host if the HTTPS request fails. |
-| `uri_fallback`             | `false` | If `/.well-known/webfinger` fails, also try `/.well-known/host-meta` and `/.well-known/host-meta.json`.    |
+| `uri_fallback`             | `false` | If `/.well-known/webfinger` fails, also try `/.well-known/host-meta` and `/.well-known/host-meta.json`. See note below — webfinger.js parses all three paths as JRD (JSON), so legacy XML host-meta responses will not succeed. |
 | `request_timeout`          | `10000` | Per-request timeout in milliseconds.                                                                       |
 | `allow_private_addresses`  | `false` | Disable the SSRF blocklist. **Development only** — never set `true` in production.                         |
 
-Setting `uri_fallback: true` is recommended when querying older infrastructure
-(some self-hosted remoteStorage and OStatus deployments still serve only
-host-meta). It costs at most two extra HTTP round-trips on miss.
+Setting `uri_fallback: true` is useful only against deployments that serve a
+JSON body at `/.well-known/host-meta` or `/.well-known/host-meta.json` — for
+example, a server that has not migrated to the RFC 7033 WebFinger path but
+already offers JRD. webfinger.js@3.0.4 does not parse XML; a classic XML
+host-meta response (`application/xrd+xml`) rejects with
+`WebFingerError: invalid json` and the fallback does not help. Each fallback
+miss costs one extra HTTP round-trip.
 
 ## API Reference
 
@@ -253,17 +268,32 @@ new WebFinger(cfg?: Partial<WebFingerConfig>)
 lookup(address: string): Promise<WebFingerResult>
 ```
 
-Accepts a bare address (`user@domain`) or an `acct:` URI; bare addresses are
-treated as `acct:` automatically. Resolves to a `WebFingerResult`; rejects with
-`WebFingerError`.
+Accepts a bare address (`user@domain`) or an `acct:` URI whose userpart is
+limited to characters that are safe in a URL query value; bare addresses are
+treated as `acct:` automatically. Rejects with `WebFingerError` for
+library-level failures and with raw `TypeError` for `fetch` failures — see the
+error-handling notes below.
 
-> **Caveat for non-`acct:` URIs**: webfinger.js@3.0.4 concatenates the address
-> into the query string verbatim (`'?resource=' + uri + address`) without
-> percent-encoding. Any `&`, `?`, `=`, or other reserved character in a passed
-> URI corrupts the request. For example, `lookup('https://example.com/p?x=1&y=2')`
-> emits `…?resource=https://example.com/p?x=1&y=2`, which the server parses as
-> `resource=https://example.com/p?x=1` plus a stray `y=2` parameter. Stick to
-> bare `user@domain` or `acct:user@domain` until the library escapes the value.
+> **Caveat — the address is not percent-encoded**: webfinger.js@3.0.4
+> concatenates the address into the query string verbatim
+> (`'?resource=' + uri + address`), so any reserved character passed in
+> corrupts the request. The most common bite is a full non-`acct:` URI —
+> `lookup('https://example.com/p?x=1&y=2')` emits
+> `…?resource=https://example.com/p?x=1&y=2`, which the server parses as
+> `resource=https://example.com/p?x=1` plus a stray `y=2` parameter. But
+> `acct:` inputs with `+`, `&`, `=`, `#`, or `?` in the userpart (all valid
+> per RFC 7565 sub-delims) also corrupt. Until the library escapes the value,
+> stick to simple addresses — `user@domain` / `acct:user@domain` where
+> `user` matches `[A-Za-z0-9._-]+`.
+
+**Error propagation:**
+
+- Library-level errors (bad address, HTTPS failure, SSRF block, HTTP 4xx/5xx,
+  malformed JRD, timeout) reject with `WebFingerError` (see below).
+- Transport-level `fetch` failures (DNS failure, TLS handshake failure,
+  network unreachable, CORS rejection in the browser) are **not** wrapped —
+  they propagate as the raw `TypeError` thrown by the runtime's `fetch`
+  implementation. A robust caller must catch both shapes.
 
 ### `lookupLink(address, rel)`
 
@@ -295,9 +325,10 @@ the full URI form (e.g. `'http://webfinger.net/rel/avatar'`) does **not** work.
 > - For non-indexed relations (notably `self` for ActivityPub, or
 >   `http://openid.net/specs/connect/1.0/issuer` for OIDC), call `lookup()` and
 >   read `result.object.links` directly.
-> - The `camlistore` rel is in the allowed list but a typo in webfinger.js
->   v3.0.4's internal mapping (`camilstore` vs `camlistore`) prevents links from
->   landing in the indexed view. Avoid relying on it.
+> - The `camlistore` rel is in the allowed list but a long-standing typo in
+>   webfinger.js's internal mapping (`camilstore` vs `camlistore`, still
+>   present as of v3.0.4) prevents links from landing in the indexed view.
+>   Avoid relying on it.
 
 ### `WebFingerError`
 
@@ -313,6 +344,11 @@ Exported as a **named** export alongside the default class:
 ```javascript
 import WebFinger, { WebFingerError } from 'webfinger.js';
 ```
+
+`WebFingerError` covers the library's own error paths. **It does not cover
+transport failures** — a `fetch()` that throws `TypeError` (DNS, TLS, network
+unreachable, CORS) propagates raw. See Example 5 for the three-shape catch
+pattern.
 
 ### Result shape
 
@@ -351,12 +387,14 @@ property is normalized into `result.idx.properties`: the namespaced `name`
 webfinger.js is built around an "ActivityPub-grade" SSRF posture and ships safe
 defaults. Treat the defaults as the baseline; only relax them with intent.
 
-- **HTTPS for public hosts.** `tls_only: true` is the default; redirects to
-  public hosts must also be HTTPS. The library will not downgrade an HTTPS
-  request to HTTP unless `tls_only: false` is set explicitly. Note: `localhost`
-  is a deliberate exception — it is always reached over HTTP, even with
-  `tls_only: true`. Pair this with `allow_private_addresses: true` for any
-  local-server testing.
+- **HTTPS for public hosts only.** `tls_only: true` is the default. For
+  non-localhost hosts, webfinger.js issues the request over HTTPS and (with
+  defaults) does not retry over HTTP; set `tls_only: false` to opt into an
+  HTTP retry after HTTPS failure. Redirects to public hosts must also be
+  HTTPS. **`tls_only` does not cover `localhost`**: for `localhost` /
+  `localhost.localdomain` the library selects HTTP unconditionally, regardless
+  of this flag. Reaching a local WebFinger server therefore also requires
+  `allow_private_addresses: true`.
 - **Private and internal addresses are blocked** by default — including DNS
   resolution. Blocked ranges:
   - Loopback: `127.0.0.0/8`, `::1`, `localhost`, `localhost.localdomain`

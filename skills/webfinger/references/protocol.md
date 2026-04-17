@@ -212,7 +212,15 @@ With `uri_fallback: true`, webfinger.js tries each of these paths in order:
 The protocol used is `https://` for public hosts and `http://` for `localhost`
 (the localhost selection is unconditional; `tls_only` does not gate it). When
 `tls_only: false`, every URL above is retried over HTTP after the HTTPS attempt
-fails. This catches deployments that have not migrated to RFC 7033 endpoints.
+fails.
+
+> **webfinger.js@3.0.4 caveat**: all three fallback paths are parsed as JRD
+> (JSON) — there is no XML parser in the library. A deployment serving classic
+> `application/xrd+xml` host-meta will reject with `WebFingerError: invalid
+> json` regardless of `uri_fallback`. The fallback is therefore only effective
+> against legacy servers that already emit a JSON body at
+> `/.well-known/host-meta` or `/.well-known/host-meta.json`. True XML LRDD
+> discovery is not supported by this library.
 
 ### Security note
 

@@ -1,8 +1,6 @@
 ---
 name: sockethub
-description: Bridges web applications to messaging protocols (IRC, XMPP, RSS/Atom) via
-  ActivityStreams. Use when building chat clients, connecting to IRC channels, sending
-  XMPP messages, fetching RSS feeds, or creating protocol-agnostic messaging applications.
+description: Use when building with Sockethub, ActivityStreams messaging, browser-to-IRC/XMPP gateways, RSS/Atom fetching, metadata previews, or multi-protocol chat clients. Also use whenever the user mentions Sockethub directly, wants browser JavaScript to talk to IRC or XMPP, or needs protocol-specific auth hidden behind one consistent message format.
 license: LGPL-3.0
 metadata:
   author: sockethub
@@ -10,76 +8,96 @@ metadata:
 
 # Sockethub
 
-A polyglot messaging gateway that translates ActivityStreams messages to
-protocol-specific formats, enabling browser JavaScript to communicate with IRC,
-XMPP, and feed services through a unified API.
+Sockethub is a protocol gateway for the web. It lets browser or server-side
+JavaScript talk to IRC, XMPP, feeds, and metadata endpoints through one
+ActivityStreams-based API.
+
+Use this skill to give guidance that matches the current `master` branch of
+`sockethub/sockethub`, not older wiki-era examples.
+
+## Core Guidance
+
+- Prefer `sc.contextFor(platform)` over hand-writing context arrays unless the
+  user explicitly needs the raw URLs.
+- Prefer `await sc.ready()` before sending anything important. The client can
+  queue messages before readiness, but ready-first is easier to reason about.
+- Treat credentials as runtime secrets. Never tell the user to hardcode,
+  commit, paste into logs, or echo back real passwords or tokens.
+- Use placeholders or environment-backed variables in examples such as
+  `process.env.SOCKETHUB_IRC_TOKEN` or `process.env.SOCKETHUB_XMPP_SECRET`.
+- Prefer tokens over passwords when the platform supports them.
+- Be precise about platform differences. IRC supports an explicit `token`
+  field. XMPP does not; it accepts a `password` field, and some deployments may
+  allow a token string in that field as a compatibility mode.
+
+## Secret Handling Rules
+
+Follow these rules whenever auth is part of the answer:
+
+- Do not ask the user to share a private password or token in chat unless the
+  task is explicitly about wiring a local secret value and there is no safer
+  alternative.
+- If the user already pasted a real secret, redact it in any echoed examples or
+  summaries.
+- Keep code samples secret-free. Show placeholders, env vars, or secret-manager
+  lookups.
+- Use neutral wording like "secret" or "credential value" in prose. Use the
+  literal field names `password` or `token` only when describing the Sockethub
+  schema.
+- When both password and token are possible, recommend the token path first.
 
 ## When to Use
 
-Invoke when you need to:
+Invoke this skill when you need to:
 
-- Connect a web application to IRC networks or XMPP servers
-- Build a browser-based chat client for multiple protocols
-- Fetch and parse RSS/Atom feeds from JavaScript
-- Send messages across different messaging platforms
-- Create protocol-agnostic messaging applications
-- Handle real-time bidirectional communication with legacy protocols
-- Generate metadata previews for shared URLs
+- Build a browser or Node client on top of Sockethub
+- Connect web apps to IRC or XMPP through Socket.IO
+- Fetch RSS or Atom feeds through Sockethub
+- Generate URL metadata or link previews
+- Explain Sockethub credential flows, connection lifecycle, or ActivityStreams
+  message shapes
+- Design a protocol-agnostic messaging app that hides IRC/XMPP specifics behind
+  one API
 
-## Architecture
+## Recommended Flow
 
-Sockethub runs as a multi-process system:
+When answering Sockethub questions, structure the guidance in this order:
 
-- **Server process**: Express + Socket.IO hub handling validation, encryption, and routing
-- **Platform workers**: Isolated processes per protocol (IRC, XMPP, Feeds, Metadata)
-- **Redis/BullMQ**: Job queue for encrypted message routing between server and workers
-- **IPC**: Platform-to-client messages bypass Redis for low latency
+1. Start the server and Redis.
+2. Create the client and wait for `ready()`.
+3. Choose the platform with `sc.contextFor(...)`.
+4. For persistent platforms, send a `credentials` event first.
+5. Send the `connect` message.
+6. Send follow-up verbs such as `join`, `send`, or `query`.
+7. Handle callback errors and `failed` events.
+8. Clear credentials on logout or when changing accounts.
 
-Each client Socket.IO connection gets a unique session with its own encryption key.
-Credentials are encrypted at rest in Redis via `@sockethub/crypto`. Platform crashes
-are isolated -- one worker failing does not affect others.
-
-**Platform types:**
-- **Persistent** (IRC, XMPP): Maintain long-lived connections, require authentication,
-  auto-reconnect on failure
-- **Stateless** (Feeds, Metadata): No persistent connections, always ready, ideal for
-  HTTP-based operations
-
-See `references/architecture.md` for detailed internals.
+If the user is building a new integration, prefer a complete vertical slice over
+isolated snippets.
 
 ## Quick Start
 
-### Server Setup
+### Server
+
+For packaged usage:
 
 ```bash
-# Install globally
-bun add -g sockethub@alpha
-
-# Start server (requires Redis)
-sockethub --port 10550
+npm install -g sockethub
+sockethub --examples
 ```
 
-Or use Docker Compose:
-
-```yaml
-# docker-compose.yml
-services:
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-  sockethub:
-    image: sockethub/sockethub:alpha
-    ports: ["10550:10550"]
-    environment:
-      REDIS_URL: redis://redis:6379
-    depends_on: [redis]
-```
+For current `master` or local development:
 
 ```bash
-docker compose up -d
+git clone https://github.com/sockethub/sockethub.git
+cd sockethub
+bun install
+bun run dev
 ```
 
-### Client Connection
+Sockethub listens on `http://localhost:10550` by default and requires Redis.
+
+### Client
 
 ```javascript
 import SockethubClient from '@sockethub/client';
@@ -87,67 +105,83 @@ import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:10550', { path: '/sockethub' });
 const sc = new SockethubClient(socket, { initTimeoutMs: 5000 });
-await sc.ready(); // loads schema registry; messages sent before ready() are queued up to configured limits
 
-// Listen for messages
-sc.socket.on('message', (msg) => console.log(msg));
+await sc.ready();
 
-// Send ActivityStreams message
-sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
-  type: 'send',
-  actor: { id: 'myuser@irc.libera.chat', type: 'person' },
-  target: { id: '#channel@irc.libera.chat', type: 'room' },
-  object: { type: 'message', content: 'Hello!' }
+sc.socket.on('message', (msg) => {
+  console.log('Sockethub message:', msg);
+});
+
+sc.socket.on('failed', (msg) => {
+  console.error('Sockethub failure:', msg);
 });
 ```
 
-## Examples
+## Platform Auth Matrix
 
-### Example 1: Connect to IRC and join a channel
+### IRC
+
+- Supports anonymous or credentialed sessions.
+- Prefer `token` over `password` when the IRC network offers personal access
+  tokens or OAuth-style flows.
+- `password` and `token` are mutually exclusive.
+- `saslMechanism` may be `PLAIN` or `OAUTHBEARER`.
+- A non-empty `password` or `token` makes the session shareable across sockets.
+  Username-only anonymous sessions are not shareable.
+
+### XMPP
+
+- Requires a `password` field in the credentials schema.
+- Prefer a deployment-issued token over a long-lived account password when the
+  deployment explicitly accepts that token in the SASL PLAIN password slot.
+- Do not claim that dedicated token SASL mechanisms are implemented. Upstream
+  documents only `SCRAM-SHA-1`, `PLAIN`, and `ANONYMOUS` via the bundled
+  `@xmpp/client`.
+- In examples and prose, call the runtime value an "XMPP secret" and explain
+  that the value may be either a password or a compatible token string.
+
+### Feeds and Metadata
+
+- No credentials required.
+- These are stateless platforms; there is no `connect` step.
+
+## Example: IRC With Preferred Token Flow
 
 ```javascript
-// Set credentials
+const ircToken = process.env.SOCKETHUB_IRC_TOKEN;
+
 sc.socket.emit('credentials', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
+  '@context': sc.contextFor('irc'),
   type: 'credentials',
-  actor: { id: 'mynick@irc.libera.chat' },
+  actor: { id: 'mynick@irc.libera.chat', type: 'person' },
   object: {
     type: 'credentials',
     nick: 'mynick',
     server: 'irc.libera.chat',
+    token: ircToken,
     port: 6697,
     secure: true
   }
+}, (result) => {
+  if (result?.error) {
+    console.error('IRC credentials failed:', result.error);
+  }
 });
 
-// Connect
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
+  '@context': sc.contextFor('irc'),
   type: 'connect',
   actor: { id: 'mynick@irc.libera.chat', type: 'person' }
+}, (result) => {
+  if (result?.error) {
+    console.error('IRC connect failed:', result.error);
+  }
 });
 
 // Join channel. Pass an ack callback to learn the outcome;
 // treat any payload with an `error` property as a failure.
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
+  '@context': sc.contextFor('irc'),
   type: 'join',
   actor: { id: 'mynick@irc.libera.chat', type: 'person' },
   target: { id: '#sockethub@irc.libera.chat', type: 'room' }
@@ -158,165 +192,133 @@ sc.socket.emit('message', {
   }
   // Channel is joined; safe to query attendance, render UI, etc.
 });
+
+sc.socket.emit('message', {
+  '@context': sc.contextFor('irc'),
+  type: 'send',
+  actor: { id: 'mynick@irc.libera.chat', type: 'person' },
+  target: { id: '#sockethub@irc.libera.chat', type: 'room' },
+  object: { type: 'message', content: 'Hello from Sockethub.' }
+});
 ```
 
-### Example 2: Send XMPP message
+## Example: XMPP With Secret Slot
 
 ```javascript
-// Set XMPP credentials
+const xmppSecret = process.env.SOCKETHUB_XMPP_SECRET;
+
 sc.socket.emit('credentials', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
-  ],
+  '@context': sc.contextFor('xmpp'),
   type: 'credentials',
-  actor: { id: 'user@jabber.org' },
+  actor: { id: 'user@jabber.net', type: 'person' },
   object: {
     type: 'credentials',
-    userAddress: 'user@jabber.org',
-    password: 'secret',
+    userAddress: 'user@jabber.net',
+    password: xmppSecret,
     resource: 'web'
   }
+}, (result) => {
+  if (result?.error) {
+    console.error('XMPP credentials failed:', result.error);
+  }
 });
 
-// Connect and send
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
-  ],
+  '@context': sc.contextFor('xmpp'),
   type: 'connect',
-  actor: { id: 'user@jabber.org', type: 'person' }
+  actor: { id: 'user@jabber.net', type: 'person' }
 });
 
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
-  ],
+  '@context': sc.contextFor('xmpp'),
   type: 'send',
-  actor: { id: 'user@jabber.org', type: 'person' },
-  target: { id: 'friend@jabber.org', type: 'person' },
-  object: { type: 'message', content: 'Hello from Sockethub!' }
+  actor: { id: 'user@jabber.net', type: 'person' },
+  target: { id: 'friend@jabber.net', type: 'person' },
+  object: { type: 'message', content: 'Hello from Sockethub.' }
 });
 ```
 
-### Example 3: Fetch RSS feed
+When explaining this example, say explicitly:
+
+- `password` is the schema field name for XMPP.
+- The runtime value can be either the real XMPP password or a deployment-issued
+  token string when that deployment accepts token-in-password-slot auth.
+- Prefer the token path when the deployment supports it.
+
+## Example: Fetch a Feed
 
 ```javascript
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/feeds/v1.jsonld'
-  ],
+  '@context': sc.contextFor('feeds'),
   type: 'fetch',
-  actor: { id: 'https://example.com/feed.rss' }
-});
-
-// Response is a Collection of Create activities with feed entries
-sc.socket.on('message', (msg) => {
-  if (msg['@context']?.some(c => c.includes('/feeds/'))) {
-    msg.object.items.forEach(entry => {
-      console.log(entry.object.title, entry.object.url);
-    });
+  actor: { id: 'https://example.com/feed.xml' }
+}, (result) => {
+  if (result?.error) {
+    console.error('Feed fetch failed:', result.error);
   }
 });
 ```
 
-### Example 4: Fetch URL metadata
+## Example: Fetch Metadata
 
 ```javascript
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/metadata/v1.jsonld'
-  ],
+  '@context': sc.contextFor('metadata'),
   type: 'fetch',
   actor: { id: 'https://example.com/article' }
 });
-
-// Response contains Open Graph data
-sc.socket.on('message', (msg) => {
-  if (msg['@context']?.some(c => c.includes('/metadata/'))) {
-    console.log(msg.object.title, msg.object.description, msg.object.image);
-  }
-});
 ```
 
-## CLI Reference
+## Error Handling and Session Behavior
 
-```
-sockethub [options]
+- Always show the callback form of `socket.emit(...)` when the user is wiring
+  connect or credentials flows. Sockethub returns callback payloads containing
+  `error` for rejected actions.
+- Also mention the `failed` event for asynchronous failures.
+- For anonymous IRC credentials, a second socket using the same actor may get
+  `username already in use`.
+- Sockethub may allow a narrow reconnect exception for anonymous credentials
+  when the stale session and reconnect share the same client IP.
+- Call `sc.clearCredentials()` when switching users or performing explicit
+  logout so the client does not replay stale credentials on reconnect.
 
-Options:
-  --port <number>        Server port (default: 10550, env: PORT)
-  --host <string>        Server host (default: localhost, env: HOST)
-  --config, -c <path>    Path to sockethub.config.json
-  --examples             Enable example pages at /examples
-  --info                 Display runtime information
-  --redis.url <url>      Redis connection URL (env: REDIS_URL)
-  --platforms <list>     Comma-separated enabled platforms
-  --public.host <host>   Public-facing hostname (reverse proxy)
-  --public.port <port>   Public-facing port
-  --public.path <path>   Public-facing base path
-  --rateLimit <number>   Max events per second per client (default: 100)
-  --sentry.dsn <dsn>     Sentry DSN for error reporting
+## ActivityStreams Shape
 
-Environment Variables:
-  PORT                                      Server port
-  HOST                                      Server hostname
-  REDIS_URL                                 Redis connection string
-  LOG_LEVEL                                 Logging verbosity (debug, info, warn, error)
-  SOCKETHUB_PLATFORM_HEARTBEAT_INTERVAL_MS  Worker heartbeat interval
-  SOCKETHUB_PLATFORM_TIMEOUT_MS             Worker timeout threshold
-```
-
-## Supported Platforms
-
-| Platform | Type | Actions | Description |
-|----------|------|---------|-------------|
-| IRC (`irc`) | Persistent | connect, join, leave, send, update, query, disconnect | Internet Relay Chat |
-| XMPP (`xmpp`) | Persistent | connect, join, leave, send, update, request-friend, make-friend, remove-friend, query, disconnect | Extensible Messaging and Presence |
-| Feeds (`feeds`) | Stateless | fetch | RSS 2.0, Atom 1.0, RSS 1.0/RDF |
-| Metadata (`metadata`) | Stateless | fetch | Open Graph and page metadata extraction |
-
-See `references/platforms.md` for per-platform details and credential schemas.
-
-## ActivityStreams Message Format
-
-All messages follow ActivityStreams 2.0 structure with Sockethub context:
+Use this shape for message examples:
 
 ```javascript
 {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',         // AS2 base
-    'https://sockethub.org/ns/context/v1.jsonld',    // Sockethub base
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'  // Platform
-  ],
-  type: 'send',                                // Action type
-  actor: { id: 'user@server', type: 'person' }, // Who is acting
-  target: { id: 'room@server', type: 'room' }, // Target of action
-  object: { type: 'message', content: '...' }  // Payload
+  '@context': sc.contextFor('irc'),
+  type: 'send',
+  actor: { id: 'user@example', type: 'person' },
+  target: { id: '#room@example', type: 'room' },
+  object: { type: 'message', content: 'Hello.' }
 }
 ```
 
-**Valid object types:** `message`, `me`, `credentials`, `attendance`, `presence`,
-`topic`, `address`
+Valid object types commonly seen in Sockethub answers:
 
-If `actor` is provided as a string, Sockethub expands it using any previously
-saved ActivityObject with the same id. If none exists, it expands to `{ id }`.
+- `message`
+- `me`
+- `credentials`
+- `attendance`
+- `presence`
+- `topic`
+- `address`
+- Server responses may also include ActivityStreams core types such as
+  `collection` and `create`
 
-The client automatically injects `@context` if missing (via `contextFor(platform)`),
-but explicitly providing it is recommended.
+## What to Avoid
 
-See `references/schema-validation.md` for full schema details.
+- Do not present Sockethub as a direct browser-to-IRC/XMPP library. It is a
+  server-side protocol gateway with a Socket.IO client API.
+- Do not recommend committing credentials to config files or code samples.
+- Do not imply XMPP supports a first-class `token` field. Upstream does not.
+- Do not lead with raw context URLs when `sc.contextFor(...)` is enough.
+- Do not omit Redis when explaining server startup.
+- Do not ignore callback or `failed`-event error paths.
 
-## API Reference
+## Useful References
 
 ### SockethubClient
 
@@ -413,3 +415,7 @@ XMPP presence updates) via the `message` event — handle them on
 - `@sockethub/platform-xmpp` - XMPP platform
 - `@sockethub/platform-feeds` - RSS/Atom platform
 - `@sockethub/irc2as` - IRC-to-ActivityStreams translator
+
+- `references/platforms.md` for per-platform verbs and credential details
+- `references/schema-validation.md` for message and credential validation
+- `references/architecture.md` for process model, encryption, and sharing rules

@@ -1,0 +1,23 @@
+{
+  "skill_name": "sockethub",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Show me how to connect a browser app to Libera IRC through Sockethub using a token, not a password.",
+      "expected_output": "Uses the IRC token field, prefers token auth, avoids asking for a real secret, and includes ready/connect/error handling.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need XMPP auth in Sockethub. My server issues tokens. What payload should I send?",
+      "expected_output": "Explains that XMPP still uses the password schema field, states the token can be passed there only when the deployment supports token-in-password-slot auth, and does not claim first-class XMPP token fields.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Write me a quick Sockethub example and tell me what credentials you need from me.",
+      "expected_output": "Gives a secret-safe example with placeholders or environment variables and avoids asking the user to paste a private password or token into chat unless absolutely necessary.",
+      "files": []
+    }
+  ]
+}

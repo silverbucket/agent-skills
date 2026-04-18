@@ -1,252 +1,215 @@
 # Sockethub Platform Reference
 
+Use this file when the user needs platform-specific verbs, credentials, or
+behavior. Keep the main answer focused on one platform at a time unless the
+user is explicitly comparing them.
+
+## Secret Handling
+
+- Never include a real password or token in examples.
+- Prefer placeholders or environment variables.
+- Prefer tokens over passwords when the platform supports them.
+- Use the literal schema field names only when describing the payload shape.
+
 ## IRC Platform (`irc`)
 
-**Type:** Persistent
+**Type:** Persistent  
 **Package:** `@sockethub/platform-irc`
 
 ### Credentials
 
+Preferred token-based example:
+
 ```javascript
 sc.socket.emit('credentials', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
+  '@context': sc.contextFor('irc'),
   type: 'credentials',
-  actor: { id: 'mynick@irc.libera.chat' },
+  actor: { id: 'mynick@irc.libera.chat', type: 'person' },
   object: {
     type: 'credentials',
-    nick: 'mynick',           // Required: IRC nickname
-    server: 'irc.libera.chat', // Required: IRC server hostname
-    port: 6697,               // Optional: default 6667 (or 6697 for TLS)
-    secure: true,             // Optional: use TLS (default: false)
-    password: '',             // Optional: server password
-    sasl: false               // Optional: use SASL authentication
+    nick: 'mynick',
+    server: 'irc.libera.chat',
+    token: process.env.SOCKETHUB_IRC_TOKEN,
+    port: 6697,
+    secure: true
   }
 });
 ```
 
+Supported credential fields:
+
+| Field | Required | Notes |
+|---|---|---|
+| `type` | yes | Must be `"credentials"`. |
+| `nick` | yes | IRC nickname. |
+| `server` | yes | IRC server hostname. |
+| `port` | no | Defaults depend on server and TLS usage. |
+| `secure` | no | Enables TLS. |
+| `username` | no | Optional alternate username. |
+| `password` | no | Traditional SASL/server password. |
+| `token` | no | Preferred when the network supports PAT or bearer-style auth. |
+| `sasl` | no | Enables SASL handling. |
+| `saslMechanism` | no | `PLAIN` or `OAUTHBEARER`. |
+
+Rules:
+
+- `password` and `token` are mutually exclusive.
+- If `saslMechanism` is `OAUTHBEARER`, a `token` is required.
+- If the network supports PAT-style auth, prefer `token` over `password`.
+- Non-empty `password` or `token` credentials are shareable across sockets.
+- Username-only credentials are treated as anonymous and may collide with
+  `username already in use`.
+
 ### Supported Actions
 
 | Action | Description | Requires Target |
-|--------|-------------|-----------------|
-| `connect` | Connect to IRC server using stored credentials | No |
-| `join` | Join a channel | Yes (room) |
-| `leave` | Leave a channel | Yes (room) |
-| `send` | Send a message to a channel or user | Yes (room or person) |
-| `update` | Update nick or topic | Depends on update type |
+|---|---|---|
+| `connect` | Connect to the IRC server using stored credentials | No |
+| `join` | Join a channel | Yes |
+| `leave` | Leave a channel | Yes |
+| `send` | Send a channel or direct message | Yes |
+| `update` | Update nick, topic, or presence-like state | Depends |
 | `query` | Query channel or user information | Yes |
-| `disconnect` | Disconnect from IRC server | No |
+| `disconnect` | Disconnect from the IRC server | No |
 
 ### IRC-Specific Behavior
 
-- Actor IDs follow the pattern `nick@server` (e.g., `mynick@irc.libera.chat`)
-- Channel targets use `#channel@server` (e.g., `#sockethub@irc.libera.chat`)
-- Incoming messages are converted via `@sockethub/irc2as` translator
-- Nick changes emit `update` messages with `object.type: 'address'`
-- Topic changes emit `update` messages with `object.type: 'topic'`
-- User join/leave events emit corresponding `join`/`leave` messages
-- Presence changes (away, back) emit messages with `object.type: 'presence'`
-- Channel user lists come as `attendance` type objects
-
-### Example: Send a channel message
-
-```javascript
-sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
-  ],
-  type: 'send',
-  actor: { id: 'mynick@irc.libera.chat', type: 'person' },
-  target: { id: '#sockethub@irc.libera.chat', type: 'room' },
-  object: { type: 'message', content: 'Hello channel!' }
-});
-```
-
----
+- Actor IDs are typically expressed as `nick@server`.
+- Channel targets use `#channel@server`.
+- Incoming events are translated through `@sockethub/irc2as`.
+- Topic, nick, and attendance changes arrive as normal ActivityStreams objects.
 
 ## XMPP Platform (`xmpp`)
 
-**Type:** Persistent
+**Type:** Persistent  
 **Package:** `@sockethub/platform-xmpp`
 
 ### Credentials
 
 ```javascript
 sc.socket.emit('credentials', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
-  ],
+  '@context': sc.contextFor('xmpp'),
   type: 'credentials',
-  actor: { id: 'user@jabber.org' },
+  actor: { id: 'user@jabber.net', type: 'person' },
   object: {
     type: 'credentials',
-    userAddress: 'user@jabber.org',  // Required: full JID
-    password: 'secret',              // Required: account password
-    resource: 'web'                  // Optional: resource identifier
+    userAddress: 'user@jabber.net',
+    password: process.env.SOCKETHUB_XMPP_SECRET,
+    resource: 'web'
   }
 });
 ```
 
+Supported credential fields:
+
+| Field | Required | Notes |
+|---|---|---|
+| `type` | yes | Must be `"credentials"`. |
+| `userAddress` | yes | Bare JID such as `user@jabber.net`. |
+| `resource` | yes | Resource identifier such as `"web"` or `"phone"`. |
+| `password` | yes | The XMPP secret slot. Use a password or a compatible deployment-issued token string. |
+| `server` | no | Optional hostname override. |
+| `port` | no | Optional port override. |
+
+Rules:
+
+- Upstream XMPP credentials expose only the `password` field name.
+- If the deployment accepts a bearer-style token in the SASL PLAIN password
+  slot, pass the token string as `password`.
+- Prefer the token path when the deployment explicitly supports it.
+- Do not claim first-class support for dedicated token SASL mechanisms such as
+  `OAUTHBEARER`, `X-OAUTH2`, `X-TOKEN`, or FAST in the bundled client.
+
 ### Supported Actions
 
 | Action | Description | Requires Target |
-|--------|-------------|-----------------|
-| `connect` | Connect to XMPP server | No |
-| `join` | Join a MUC (multi-user chat) room | Yes (room) |
-| `leave` | Leave a MUC room | Yes (room) |
-| `send` | Send a message | Yes (person or room) |
+|---|---|---|
+| `connect` | Connect to the XMPP server | No |
+| `join` | Join a MUC room | Yes |
+| `leave` | Leave a MUC room | Yes |
+| `send` | Send a direct or room message | Yes |
 | `update` | Update presence or status | No |
-| `request-friend` | Send a roster subscription request | Yes (person) |
-| `make-friend` | Accept a roster subscription | Yes (person) |
-| `remove-friend` | Remove a roster subscription | Yes (person) |
-| `query` | Query roster or room info | Optional |
-| `disconnect` | Disconnect from XMPP server | No |
+| `request-friend` | Send a roster subscription request | Yes |
+| `make-friend` | Accept a roster subscription | Yes |
+| `remove-friend` | Remove a roster subscription | Yes |
+| `query` | Query roster or room information | Optional |
+| `disconnect` | Disconnect from the server | No |
 
-### Example: Send a direct message
+### XMPP-Specific Behavior
 
-```javascript
-sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/xmpp/v1.jsonld'
-  ],
-  type: 'send',
-  actor: { id: 'user@jabber.org', type: 'person' },
-  target: { id: 'friend@jabber.org', type: 'person' },
-  object: { type: 'message', content: 'Hello!' }
-});
-```
-
----
+- Failed auth with either a password or a token-in-password-slot usually
+  surfaces as `SASLError: not-authorized`.
+- Sockethub keeps the credentials schema small and delegates most SASL behavior
+  to the bundled `@xmpp/client`.
 
 ## Feeds Platform (`feeds`)
 
-**Type:** Stateless
+**Type:** Stateless  
 **Package:** `@sockethub/platform-feeds`
 
 ### Supported Actions
 
 | Action | Description |
-|--------|-------------|
-| `fetch` | Fetch and parse an RSS/Atom feed URL |
+|---|---|
+| `fetch` | Fetch and parse an RSS or Atom feed URL |
 
-Supports RSS 2.0, Atom 1.0, and RSS 1.0/RDF formats. Uses `podparse` for parsing.
-
-### Example: Fetch a feed
+Example:
 
 ```javascript
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/feeds/v1.jsonld'
-  ],
+  '@context': sc.contextFor('feeds'),
   type: 'fetch',
   actor: { id: 'https://blog.example.com/feed.xml' }
 });
 ```
 
-### Response Format
+Response patterns:
 
-The response is a Collection of Create activities:
-
-```javascript
-{
-  '@context': [...],
-  type: 'fetch',
-  actor: { id: 'https://blog.example.com/feed.xml' },
-  object: {
-    type: 'collection',
-    items: [
-      {
-        type: 'create',
-        object: {
-          type: 'message',
-          title: 'Article Title',
-          url: 'https://blog.example.com/article',
-          content: 'Article summary...',
-          published: '2026-03-15T10:00:00Z'
-        }
-      }
-    ]
-  }
-}
-```
-
----
+- Feed responses commonly come back as a `collection`.
+- Individual items often appear as `create` activities whose `object` contains
+  the entry content.
 
 ## Metadata Platform (`metadata`)
 
-**Type:** Stateless
+**Type:** Stateless  
 **Package:** `@sockethub/platform-metadata`
 
 ### Supported Actions
 
 | Action | Description |
-|--------|-------------|
+|---|---|
 | `fetch` | Extract Open Graph and page metadata from a URL |
 
-Uses `open-graph-scraper` to extract OG tags, page titles, descriptions, and images.
-
-### Example: Fetch page metadata
+Example:
 
 ```javascript
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/metadata/v1.jsonld'
-  ],
+  '@context': sc.contextFor('metadata'),
   type: 'fetch',
   actor: { id: 'https://example.com/article' }
 });
 ```
 
-### Response Format
+Typical response fields:
 
-```javascript
-{
-  '@context': [...],
-  type: 'fetch',
-  actor: { id: 'https://example.com/article' },
-  object: {
-    type: 'message',
-    title: 'Page Title',
-    description: 'Page description from OG tags',
-    image: 'https://example.com/og-image.jpg',
-    url: 'https://example.com/article'
-  }
-}
-```
-
----
+- `title`
+- `description`
+- `image`
+- `url`
 
 ## Dummy Platform (`dummy`)
 
-**Type:** Stateless
+**Type:** Stateless  
 **Package:** `@sockethub/platform-dummy`
 
-An echo/testing platform for development and integration testing. Echoes back
-any message sent to it. Useful for verifying Sockethub server setup without
-needing external services.
+Use this platform first when the user wants to verify local Sockethub wiring
+before introducing external credentials or network dependencies.
 
 ```javascript
 sc.socket.emit('message', {
-  '@context': [
-    'https://www.w3.org/ns/activitystreams',
-    'https://sockethub.org/ns/context/v1.jsonld',
-    'https://sockethub.org/ns/context/platform/dummy/v1.jsonld'
-  ],
+  '@context': sc.contextFor('dummy'),
   type: 'send',
-  actor: { id: 'test-user' },
+  actor: { id: 'test-user', type: 'person' },
   object: { type: 'message', content: 'echo test' }
 });
 ```

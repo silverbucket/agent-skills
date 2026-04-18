@@ -1,101 +1,101 @@
 # Sockethub Schema and Validation Reference
 
+Use this file when the user needs exact payload shape, validation behavior, or
+the difference between `credentials` and `message`.
+
 ## Schema Registry
 
-The schema registry is loaded when the client calls `await sc.ready()`. It contains
-validation rules for all enabled platforms, including supported action types and
-object schemas. The registry is provided by `@sockethub/schemas`.
+The client loads the schema registry during `await sc.ready()`. That registry
+contains:
 
-## @context Structure
+- enabled platform IDs
+- supported verbs
+- platform credential schemas
+- ActivityStreams validation rules
 
-Every ActivityStreams message uses a three-element `@context` array:
+## Context Handling
+
+Prefer:
 
 ```javascript
-'@context': [
-  'https://www.w3.org/ns/activitystreams',                              // 1. AS2 base
-  'https://sockethub.org/ns/context/v1.jsonld',                         // 2. Sockethub base
-  'https://sockethub.org/ns/context/platform/{platformId}/v1.jsonld'    // 3. Platform-specific
+sc.contextFor('irc')
+```
+
+Instead of hand-writing:
+
+```javascript
+[
+  'https://www.w3.org/ns/activitystreams',
+  'https://sockethub.org/ns/context/v1.jsonld',
+  'https://sockethub.org/ns/context/platform/irc/v1.jsonld'
 ]
 ```
 
-**Context URL constants:**
-- `AS2_BASE_CONTEXT_URL`: `https://www.w3.org/ns/activitystreams`
-- `SOCKETHUB_BASE_CONTEXT_URL`: `https://sockethub.org/ns/context/v1.jsonld`
-- `PLATFORM_CONTEXT_PREFIX`: `https://sockethub.org/ns/context/platform/`
+Use raw arrays only when the user specifically needs the canonical URLs.
 
-The client's `contextFor(platform)` method builds this array automatically.
+## Event Types
 
-## Valid Object Types
+- Use the `credentials` Socket.IO event for credential payloads.
+- Use the `message` Socket.IO event for verbs like `connect`, `join`, `send`,
+  `fetch`, `query`, and `disconnect`.
 
-Outbound messages (client to platform) must use one of these object types.
-Server responses may also include AS2 core types like `collection` and `create`
-(e.g., feed fetch results).
+This distinction matters. A valid credential payload sent on the wrong event is
+still the wrong API usage.
 
-| Type | Description | Usage |
-|------|-------------|-------|
-| `message` | Chat message or content | Sending/receiving text messages |
-| `me` | Action message (IRC /me) | Emoting or action descriptions |
-| `credentials` | Authentication data | Setting platform credentials |
-| `attendance` | User list for a room | Channel/room user listings |
-| `presence` | Online/away status | Presence updates |
-| `topic` | Room topic/subject | Channel topic changes |
-| `address` | Identity/nick change | Nick changes, identity updates |
-
-Using an invalid type (e.g., `'Note'`) causes validation failure -- the server
-emits a `failed` event back to the client, but the error message may not clearly
-indicate that the object type was the problem.
-
-## Exported Schemas
-
-`@sockethub/schemas` exports:
-
-```typescript
-// Schema objects
-PlatformSchema          // Platform configuration structure
-ActivityObjectSchema    // Individual activity objects
-ActivityStreamSchema    // Full ActivityStreams messages
-SockethubConfigSchema   // Server configuration
-
-// Validation functions
-validateSchema(schema, data)      // Validate data against a schema
-validateCredentials(creds)        // Validate credential objects
-validateActivity(activity)        // Validate ActivityStreams messages
-validateObject(obj)               // Validate activity objects
-
-// Platform utilities
-getPlatformId(context)            // Extract platform ID from @context
-resolvePlatform(id)               // Resolve platform module
-registerPlatform(id, schema)      // Register a platform schema
-
-// Type lists
-ObjectTypesList                   // Public object types
-InternalObjectTypesList           // Internal-only types
-```
-
-## Message Validation Flow
-
-1. Client sends message via Socket.IO
-2. Server extracts platform ID from `@context` array
-3. Server validates message structure against `ActivityStreamSchema`
-4. Server validates object type against platform's allowed types
-5. Server validates action type (e.g., `send`, `join`) against platform's supported actions
-6. If validation passes, message is encrypted and enqueued
-7. If validation fails, a `failed` event is emitted back to the client
-
-## Credential Validation
-
-Credentials follow a platform-specific schema but share common structure:
+## Common ActivityStreams Shape
 
 ```javascript
 {
-  '@context': [...],           // Required: platform context
-  type: 'credentials',        // Required: must be 'credentials'
-  actor: { id: 'user@host' }, // Required: who the credentials belong to
+  '@context': sc.contextFor('irc'),
+  type: 'send',
+  actor: { id: 'user@example', type: 'person' },
+  target: { id: '#room@example', type: 'room' },
+  object: { type: 'message', content: 'Hello.' }
+}
+```
+
+## Credential Shape
+
+```javascript
+{
+  '@context': sc.contextFor('irc'),
+  type: 'credentials',
+  actor: { id: 'user@example', type: 'person' },
   object: {
-    type: 'credentials',      // Required: must be 'credentials'
-    // ... platform-specific fields (see platforms.md)
+    type: 'credentials',
+    // platform-specific fields
   }
 }
 ```
 
-Credentials are sent via the dedicated `credentials` event, not the `message` event.
+## Secret-Sensitive Fields
+
+Treat these fields as secrets in examples and responses:
+
+- `password`
+- `token`
+
+Guidance:
+
+- Keep example values in env vars or placeholders.
+- Never echo real secret values back to the user.
+- If comparing schemas, distinguish between the schema field name and the
+  recommended runtime source of the value.
+
+## Validation Flow
+
+1. Sockethub resolves the platform from `@context`.
+2. It validates the outer ActivityStreams envelope.
+3. It validates the verb against the selected platform.
+4. It validates the object payload against the platform schema.
+5. Failures surface through callback errors and `failed` events.
+
+## Common Validation Notes
+
+- `type: 'credentials'` is required both at the top level and inside
+  `object.type` for credential payloads.
+- IRC credentials may include either `password` or `token`, but not both.
+- XMPP credentials use the `password` schema field even when the runtime value
+  is a deployment-issued token string.
+- Server responses may include ActivityStreams core types such as `collection`
+  and `create`, especially for feeds.

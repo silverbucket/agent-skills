@@ -1,68 +1,61 @@
 # Sockethub Architecture
 
+Use this file when the user needs process-model or lifecycle detail. Do not lead
+with internals if the task is simply "how do I send a message".
+
 ## Multi-Process Model
 
-Sockethub runs as multiple cooperating processes:
+Sockethub runs as cooperating processes:
 
-```
-┌─────────────┐     ┌─────────────────────────────┐     ┌──────────────────┐
-│ Web Clients │◄───►│ Sockethub Server             │◄───►│ Redis (BullMQ)   │
-│ (Socket.IO) │     │ Express + Socket.IO          │     │ Job Queue        │
-└─────────────┘     │ Validation, Encryption,      │     │ Credential Store │
-                    │ Routing, Rate Limiting       │     └────────┬─────────┘
-                    └─────────────────────────────┘              │
-                              ▲ IPC                              │
-                              │                                  ▼
-                    ┌─────────┴──────────────────────────────────────┐
-                    │ Platform Workers (isolated processes)           │
-                    │ ┌─────┐ ┌──────┐ ┌───────┐ ┌──────────┐      │
-                    │ │ IRC │ │ XMPP │ │ Feeds │ │ Metadata │ ... │
-                    │ └─────┘ └──────┘ └───────┘ └──────────┘      │
-                    └────────────────────────────────────────────────┘
+```text
+Web client <-> Sockethub server <-> Redis/BullMQ <-> platform workers
 ```
 
-## Message Flow
+Main pieces:
 
-### Client to Platform (outbound)
+- **Sockethub server**: Socket.IO entrypoint, validation, routing, credential
+  storage, and platform orchestration
+- **Platform workers**: One process per platform such as IRC, XMPP, Feeds, or
+  Metadata
+- **Redis + BullMQ**: Encrypted job queue plus credential/state storage
+- **IPC**: Fast worker-to-server event path for inbound protocol messages
 
-1. Client sends ActivityStreams message via Socket.IO
-2. Server validates message against platform schema
-3. Server encrypts message with session encryption key
-4. Encrypted job is enqueued to Redis via BullMQ
-5. Platform worker picks up job from its queue
-6. Worker decrypts and processes the message
-7. Worker executes protocol-specific action (e.g., IRC PRIVMSG)
+## Request Lifecycle
 
-### Platform to Client (inbound)
+1. Client connects over Socket.IO.
+2. Client calls `await sc.ready()` and receives the schema registry.
+3. Client sends `credentials` for persistent platforms.
+4. Server validates and encrypts credentials before storing them in Redis.
+5. Client sends `connect`, `join`, `send`, or other ActivityStreams messages.
+6. Server validates the message and enqueues work for the target platform.
+7. Platform worker processes the job and emits translated ActivityStreams back
+   to the client.
 
-1. Platform worker receives protocol event (e.g., incoming IRC message)
-2. Worker converts event to ActivityStreams format
-3. Worker sends message to server via IPC (bypasses Redis for low latency)
-4. Server routes message to the correct client session via Socket.IO
+## Credential Storage
 
-## Session Lifecycle
+- Each socket session gets its own encryption secret.
+- Credentials are encrypted before they are stored in Redis.
+- Platform workers decrypt credentials only when they need to process jobs.
+- Keys are not persisted across a server restart.
 
-1. **Connect**: Client establishes Socket.IO connection, server assigns unique session ID
-2. **Initialize**: Client calls `await sc.ready()`, server sends schema registry
-3. **Authenticate**: Client sends credentials via `credentials` event, server encrypts
-   and stores in Redis keyed by session ID + credential ID
-4. **Operate**: Client sends/receives ActivityStreams messages
-5. **Disconnect**: Session cleanup, credentials removed from Redis, platform connections
-   closed if no other sessions reference them
+## Persistent vs Stateless Platforms
 
-## Credential Encryption
+### Persistent
 
-All credentials are encrypted using `@sockethub/crypto`:
+IRC and XMPP keep long-lived remote connections and track actor-specific state.
 
-- Each session gets a unique encryption key generated at connection time
-- Credentials are encrypted before storage in Redis
-- Platform workers decrypt credentials when processing jobs
-- Keys are never stored persistently -- lost on server restart
-- Redis key pattern: `sockethub:{parentId}:data-layer:credentials-store:{sessionId}:{credentialId}`
+Important behavior:
 
-## Job Queue
+- Sockethub can attach multiple sockets to one running platform instance when
+  they target the same actor and the credentials pass share validation.
+- Share is allowed only when credentials include a non-empty `password` or
+  `token`.
+- Username-only anonymous credentials are not shareable and may return
+  `username already in use`.
+- Sockethub allows a narrow reconnect exception for stale anonymous sessions
+  when the reconnect comes from the same client IP.
 
-BullMQ manages the message queue in Redis:
+### Stateless
 
 - Queue naming: `sockethub:{parentId}:data-layer:queue:{platformId}`
 - Each platform has its own dedicated queue
@@ -73,42 +66,22 @@ BullMQ manages the message queue in Redis:
   or, for broadcasts and peers, as a `message` Socket.IO event. The client
   does **not** receive `completed` / `failed` as Socket.IO events directly.
 
-## Platform Workers
+Feeds and Metadata process each request independently:
 
-### Lifecycle
+- no credential storage
+- no `connect` step
+- no long-lived remote session to reuse
 
-1. **Spawn**: Server spawns worker process for each enabled platform
-2. **Register**: Worker registers its supported actions with the server
-3. **Heartbeat**: Worker sends periodic heartbeats (configurable via
-   `SOCKETHUB_PLATFORM_HEARTBEAT_INTERVAL_MS`)
-4. **Process**: Worker polls its BullMQ queue for jobs
-5. **Timeout**: If heartbeat is missed beyond `SOCKETHUB_PLATFORM_TIMEOUT_MS`,
-   server marks worker as unhealthy and respawns
+## Failure Isolation
 
-### Persistent vs Stateless
+- A crashing platform worker does not take down the whole server.
+- Failed jobs surface back to the client through callbacks or `failed` events.
+- Platform heartbeat and timeout settings determine when workers are considered
+  unhealthy and respawned.
 
-**Persistent platforms** (IRC, XMPP):
-- Maintain long-lived protocol connections
-- `isInitialized()` returns `true` only when connected
-- Track connection state per actor
-- Auto-reconnect on temporary failures
-- Connections shared across sessions using the same actor credentials
+## Practical Implications for Answers
 
-**Stateless platforms** (Feeds, Metadata):
-- No persistent connections
-- `isInitialized()` always returns `true`
-- Each job is independent
-- No connection management needed
-
-## Rate Limiting
-
-- Configurable per-client rate limit (default: 100 events/second)
-- Applied at the Socket.IO event level before validation
-- Excess messages are dropped with an error event sent to the client
-
-## Scaling
-
-- Multiple Sockethub server instances can share a Redis cluster
-- Platform workers scale independently per platform
-- Redis handles job distribution across workers
-- Socket.IO adapter (e.g., Redis adapter) enables multi-instance client routing
+- Mention Redis whenever explaining Sockethub deployment.
+- Mention credential replay and `sc.clearCredentials()` whenever the user is
+  asking about reconnects, logout, or account switching.
+- Mention session sharing only for persistent platforms.

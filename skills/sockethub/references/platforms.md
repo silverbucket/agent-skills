@@ -124,6 +124,7 @@ sc.socket.emit('credentials', {
 | `join` | Join a channel | Yes (room) |
 | `leave` | Leave a channel | Yes (room) |
 | `send` | Send a message to a channel or user | Yes (room or person) |
+| `announce` | Send a notice to a channel or user (IRC NOTICE) | Yes (room or person) |
 | `update` | Update nick or topic | Depends on update type |
 | `query` | Query channel or user information | Yes |
 | `disconnect` | Disconnect from IRC server | No |
@@ -189,9 +190,10 @@ sc.socket.emit('message', {
 
 ### Credentials
 
-XMPP uses a single `password` field for all authentication. For servers that
-accept bearer-style tokens in the SASL PLAIN password slot, pass the token
-string as `password`. This is common practice for many XMPP servers.
+XMPP uses a single `password` field for all authentication. Some deployments
+accept a bearer-style token in the SASL PLAIN password slot as a compatibility
+mode — pass the token string as `password` only when the server explicitly
+supports it.
 
 Dedicated token SASL mechanisms (ejabberd X-OAUTH2, Prosody OAUTHBEARER,
 Prosody community X-TOKEN, SASL2 FAST) are not implemented by this client.
@@ -204,7 +206,7 @@ sc.socket.emit('credentials', {
   object: {
     type: 'credentials',
     userAddress: 'user@jabber.org',
-    password: process.env.XMPP_TOKEN,  // accepts token or password
+    password: process.env.XMPP_PASSWORD,  // or a token, if your server accepts it
     resource: 'web'
   }
 });
@@ -216,7 +218,7 @@ sc.socket.emit('credentials', {
 |-------|------|----------|-------------|
 | `type` | string | Yes | Must be `'credentials'` |
 | `userAddress` | string | Yes | Full JID (e.g., `user@jabber.org`) |
-| `password` | string | Yes | Account password or bearer token |
+| `password` | string | Yes | Account password (or token if the server explicitly supports it) |
 | `resource` | string | Yes | Resource identifier (e.g., `'web'`, `'phone'`) |
 | `server` | string | No | Override server hostname (extracted from `userAddress` if omitted) |
 | `port` | number | No | Override server port (appended to service URL) |

@@ -47,8 +47,8 @@ Server responses may also include AS2 core types like `collection` and `create`
 | `address` | Identity/nick change | Nick changes, identity updates |
 
 Using an invalid type (e.g., `'Note'`) causes validation failure -- the server
-emits a `failed` event back to the client, but the error message may not clearly
-indicate that the object type was the problem.
+returns the error via the ack callback (if one was provided), but the error
+message may not clearly indicate that the object type was the problem.
 
 ## Exported Schemas
 
@@ -85,7 +85,7 @@ InternalObjectTypesList           // Internal-only types
 4. Server validates object type against platform's allowed types
 5. Server validates action type (e.g., `send`, `join`) against platform's supported actions
 6. If validation passes, message is encrypted and enqueued
-7. If validation fails, a `failed` event is emitted back to the client
+7. If validation fails, the error is returned via the ack callback
 
 ## Credential Validation
 
@@ -119,8 +119,9 @@ ensure that:
 ### XMPP Credential Validation
 
 XMPP requires `userAddress`, `password`, and `resource`. The `password` field
-accepts both traditional passwords and bearer tokens -- the XMPP client passes
-the value directly to `xmpp.js` which handles SASL negotiation with the server.
+is passed directly to `xmpp.js` for SASL negotiation. Some deployments accept
+a token string in the password slot as a compatibility mode, but this is
+server-dependent — dedicated token SASL mechanisms are not implemented.
 
 ## Acknowledgement Callbacks
 

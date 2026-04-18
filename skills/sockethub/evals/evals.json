@@ -175,7 +175,65 @@
     },
     {
       "id": 6,
-      "prompt": "Write me a quick Sockethub example that connects to IRC and sends a message. What credentials do you need from me?",
+      "prompt": "I want to send a channel-wide notice (not a regular message) to #dev on irc.libera.chat using Sockethub. How do I do that?",
+      "expected_output": "Uses the `announce` action type (not `send`), which maps to an IRC NOTICE. Follows the standard credentials -> connect -> announce flow with contextFor('irc') and an ack callback.",
+      "assertions": [
+        {
+          "name": "uses_announce_action",
+          "description": "Uses type: 'announce' for IRC NOTICE",
+          "type": "contains",
+          "value": "announce"
+        },
+        {
+          "name": "not_send",
+          "description": "Does not use type: 'send' for the notice",
+          "type": "custom",
+          "check": "The announce/notice message uses type 'announce', not type 'send'"
+        },
+        {
+          "name": "uses_context_for",
+          "description": "Uses sc.contextFor('irc')",
+          "type": "contains",
+          "value": "contextFor"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Does Sockethub's XMPP platform support OAuth tokens? How do I authenticate with a token?",
+      "expected_output": "Explains that XMPP has no separate token field -- it only has a `password` field. Token-in-password-slot works only when the specific XMPP server/deployment explicitly supports it. Does NOT say tokens are preferred or broadly supported for XMPP. Mentions that dedicated token SASL mechanisms are not implemented.",
+      "assertions": [
+        {
+          "name": "no_separate_token_field",
+          "description": "Explains XMPP has no dedicated token field",
+          "type": "custom",
+          "check": "Response clearly states XMPP has no separate/dedicated/first-class token field"
+        },
+        {
+          "name": "password_field_only",
+          "description": "Says tokens go via the password field",
+          "type": "contains",
+          "value": "password"
+        },
+        {
+          "name": "deployment_dependent",
+          "description": "Notes that token-in-password support is server/deployment dependent",
+          "type": "custom",
+          "check": "Response qualifies token support as deployment-specific, server-dependent, or compatibility mode -- not broadly available"
+        },
+        {
+          "name": "not_preferred",
+          "description": "Does not frame tokens as preferred or recommended for XMPP",
+          "type": "not_contains",
+          "value": "preferred"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "Write me a quick Sockethub example that connects to IRC and sends a message. What credentials do I need to provide?",
       "expected_output": "Gives a secret-safe example with placeholders or environment variables and avoids asking the user to paste a private password or token into chat. Does not hardcode any credential values. Uses contextFor and ack callbacks.",
       "assertions": [
         {

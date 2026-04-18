@@ -195,9 +195,9 @@ sc.socket.emit('message', {
 
 ## Authentication
 
-Both IRC and XMPP support token-based authentication, which is the preferred
-approach. Tokens avoid transmitting reusable passwords and can be scoped or
-revoked independently.
+IRC has first-class token support. XMPP does not — it only exposes a
+`password` field, though some deployments accept a token string in that
+field as a compatibility mode.
 
 ### IRC
 
@@ -288,7 +288,7 @@ sc.socket.emit('credentials', {
   object: {
     type: 'credentials',
     userAddress: actorId,
-    password: process.env.XMPP_TOKEN,
+    password: process.env.XMPP_PASSWORD,  // or a token, if your server accepts it
     resource: 'web'
   }
 });
@@ -368,7 +368,7 @@ Environment: PORT, HOST, REDIS_URL, LOG_LEVEL,
 
 | Platform | Type | Actions | Description |
 |----------|------|---------|-------------|
-| IRC (`irc`) | Persistent | connect, join, leave, send, update, query, disconnect | Internet Relay Chat |
+| IRC (`irc`) | Persistent | connect, join, leave, send, announce, update, query, disconnect | Internet Relay Chat |
 | XMPP (`xmpp`) | Persistent | connect, join, leave, send, update, request-friend, make-friend, remove-friend, query, disconnect | Extensible Messaging and Presence |
 | Feeds (`feeds`) | Stateless | fetch | RSS 2.0, Atom 1.0, RSS 1.0/RDF |
 | Metadata (`metadata`) | Stateless | fetch | Open Graph and page metadata extraction |
@@ -461,7 +461,7 @@ and may return `username already in use`.
 - Do not imply XMPP supports a first-class `token` field. Upstream does not.
 - Do not lead with raw context URLs when `sc.contextFor(...)` is enough.
 - Do not omit Redis when explaining server startup.
-- Do not ignore callback or `failed`-event error paths.
+- Do not ignore ack-callback error paths.
 - If the user pastes a real secret, redact it in any echoed examples or
   summaries.
 

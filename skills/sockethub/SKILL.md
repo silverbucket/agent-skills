@@ -62,8 +62,9 @@ Credentials are encrypted at rest in Redis via `@sockethub/crypto`. Platform cra
 are isolated -- one worker failing does not affect others.
 
 **Platform types:**
-- **Persistent** (IRC, XMPP): Maintain long-lived connections, require authentication,
-  auto-reconnect on failure
+- **Persistent** (IRC, XMPP): Maintain long-lived connections, require authentication.
+  XMPP auto-reconnects on recoverable network errors; IRC does not — the client
+  must re-issue a connect action after connection loss.
 - **Stateless** (Feeds, Metadata): No persistent connections, always ready, ideal for
   HTTP-based operations
 

@@ -95,8 +95,11 @@ BullMQ manages the message queue in Redis:
 - Maintain long-lived protocol connections
 - `isInitialized()` returns `true` only when connected
 - Track connection state per actor
-- Auto-reconnect on temporary failures
 - Connections shared across sessions using the same actor credentials
+- Reconnect behavior differs per platform:
+  - **XMPP**: auto-reconnects on recoverable network errors (see below)
+  - **IRC**: force-disconnects on error/close/timeout — the client must
+    re-issue a connect action to restore the session
 
 **Stateless platforms** (Feeds, Metadata):
 - No persistent connections
